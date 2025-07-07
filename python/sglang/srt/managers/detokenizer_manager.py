@@ -116,7 +116,7 @@ class DetokenizerManager:
         if no_stop_trim or not finished_reason:
             return output
 
-        matched = finished_reason.get("matched", None)
+        matched = finished_reason.get("matched")
         if not matched:
             return output
 
@@ -124,13 +124,12 @@ class DetokenizerManager:
 
         # Trim stop str.
         if isinstance(matched, str) and isinstance(output, str):
-            pos = output.find(matched)
-            return output[:pos] if pos != -1 else output
-
+            if (pos := output.find(matched)) != -1:
+                return output[:pos]
         # Trim stop token.
-        if isinstance(matched, int) and isinstance(output, list):
-            assert len(output) > 0
+        elif isinstance(matched, int) and isinstance(output, list) and output:
             return output[:-1]
+
         return output
 
     def handle_batch_embedding_out(self, recv_obj: BatchEmbeddingOut):
@@ -185,16 +184,17 @@ class DetokenizerManager:
             except KeyError:
                 raise RuntimeError(
                     f"Decode status not found for request {recv_obj.rids[i]}. "
-                    "It may be due to the request being evicted from the decode status due to memory pressure. "
-                    "Please increase the maximum number of requests by setting "
-                    "the SGLANG_DETOKENIZER_MAX_STATES environment variable to a bigger value than the default value. "
-                    f"The current value is {DETOKENIZER_MAX_STATES}. "
-                    "For more details, see: https://github.com/sgl-project/sglang/issues/2812"
-                )
+                    f"The decode status dictionary has a capacity of {self.decode_status.capacity} "
+                    f"and currently holds {len(self.decode_status)} states. "
+                    "The request might have been evicted due to memory pressure. "
+                    "To mitigate this, you can increase the capacity by setting the "
+                    "SGLANG_DETOKENIZER_MAX_STATES environment variable to a value larger than the current "
+                    f"{DETOKENIZER_MAX_STATES}. For more details, see: https://github.com/sgl-project/sglang/issues/2812"
+                ) from None
             new_text = read_texts[i][len(surr_texts[i]) :]
             if recv_obj.finished_reasons[i] is None:
                 # Streaming chunk: update the decode status
-                if len(new_text) > 0 and not new_text.endswith("�"):
+                if new_text and not new_text.endswith("\ufffd"):
                     s.decoded_text = s.decoded_text + new_text
                     s.surr_offset = s.read_offset
                     s.read_offset = len(s.decode_ids)
